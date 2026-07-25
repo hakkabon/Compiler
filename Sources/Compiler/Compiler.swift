@@ -1,8 +1,16 @@
+//
+//  Compiler.swift
+//  Compiler
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import Foundation
 
 public struct CompilationArtifacts: Sendable {
     public let sourceAST: ASTNode
-    public let typedAST: ASTNode
+    public let typedAST: ResolvedASTNode
     public let symbols: [Symbol]
     public let ir: IRProgram
 }

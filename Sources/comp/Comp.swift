@@ -1,3 +1,11 @@
+//
+//  Comp.swift
+//  comp
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import ArgumentParser
 import Compiler
 import CYK_Parser
@@ -39,6 +47,9 @@ extension CompilerTool {
         @Option(help: "Execution target.")
         var target: CompilationTarget = .stack
 
+        @Option(help: "JSON AST-action mapping; when present, compile the external parser's tree directly.")
+        var actions: String?
+
         @Option(
             parsing: .upToNextOption,
             help: "Stages to print: grammar tokens trees ast typed-ast ir bytecode result."
@@ -66,6 +77,9 @@ extension CompilerTool {
             }
             if lexer == .dfa, parser != .earley {
                 throw ValidationError("--lexer dfa currently requires --parser earley")
+            }
+            if let actions, !FileManager.default.fileExists(atPath: actions) {
+                throw ValidationError("AST action file does not exist: \(actions)")
             }
         }
 
@@ -97,7 +111,14 @@ extension CompilerTool {
             if parseOnly { return }
 
             let compiler = Compiler()
-            let ast = try compiler.parse(source, file: sourceFile)
+            let ast: ASTNode
+            if let actions {
+                guard let tree = forest.trees.first else { throw ValidationError("The parser produced no syntax tree") }
+                let mapping = try ASTMapping(json: Data(contentsOf: URL(fileURLWithPath: actions)))
+                ast = try ASTBuilder(mapping: mapping).build(from: tree)
+            } else {
+                ast = try compiler.parse(source, file: sourceFile)
+            }
             let artifacts = try compiler.analyze(ast)
             if emit.contains(.ast) { print(ast) }
             if emit.contains(.typedAST) { print(artifacts.typedAST) }

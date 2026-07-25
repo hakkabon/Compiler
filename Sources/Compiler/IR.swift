@@ -1,3 +1,11 @@
+//
+//  IR.swift
+//  Compiler
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import Foundation
 
 public struct IRLabel: Hashable, Sendable {
@@ -19,6 +27,12 @@ public enum IROperation: Equatable, Sendable {
     case discard
     case call(name: String, argumentCount: Int)
     case returnValue(hasValue: Bool)
+    case buildArray(count: Int)
+    case loadIndex
+    case storeIndex(slot: Int)
+    case buildRecord(name: String, fields: [String])
+    case loadField(String)
+    case storeField(slot: Int, field: String)
     case halt
 }
 
@@ -46,7 +60,6 @@ public struct IRProgram: Equatable, Sendable {
 
 public final class IRLowerer {
     private var operations: [IROperation] = []
-    private var slots: [String: Int] = [:]
     private var nextLabel = 0
     private var functionLabels: [String: IRLabel] = [:]
 
@@ -54,7 +67,6 @@ public final class IRLowerer {
 
     public func lower(_ result: SemanticResult) throws -> IRProgram {
         operations = []
-        slots = Dictionary(uniqueKeysWithValues: result.symbols.map { ($0.name, $0.slot) })
         nextLabel = 0
         functionLabels = Dictionary(uniqueKeysWithValues: result.functions.keys.sorted().map { ($0, label()) })
         if case .program(let declarations, let body, _) = result.ast {
@@ -72,7 +84,7 @@ public final class IRLowerer {
             for declaration in declarations {
                 guard case .functionDecl(let name, let parameters, _, let body, _) = declaration,
                       let entry = functionLabels[name] else { continue }
-                let parameterSlots = try parameters.map { try slot($0.name) }
+                let parameterSlots = parameters.map(\.slot)
                 functions.append(IRFunction(name: name, entry: entry, parameterSlots: parameterSlots))
                 operations.append(.label(entry))
                 try emit(body)
@@ -85,24 +97,20 @@ public final class IRLowerer {
 
     private func label() -> IRLabel { defer { nextLabel += 1 }; return IRLabel(nextLabel) }
 
-    private func emit(_ node: ASTNode) throws {
+    private func emit(_ node: ResolvedASTNode) throws {
         switch node {
-        case .intLiteral(let value, _): operations.append(.constant(.int(value)))
-        case .floatLiteral(let value, _): operations.append(.constant(.float(value)))
-        case .stringLiteral(let value, _): operations.append(.constant(.string(value)))
-        case .booleanLiteral(let value, _): operations.append(.constant(.boolean(value)))
-        case .nullLiteral: operations.append(.constant(.null))
-        case .variable(let name, _): operations.append(.load(slot: try slot(name)))
+        case .literal(let value, _): operations.append(.constant(value))
+        case .variable(let symbol, _): operations.append(.load(slot: symbol.slot))
         case .binary(let op, let left, let right, _):
             try emit(left); try emit(right); operations.append(.binary(op))
         case .unary(let op, let operand, _):
             try emit(operand); operations.append(.unary(op))
-        case .varDecl(let name, let initializer, let type):
+        case .varDecl(let symbol, let initializer, let type):
             if let initializer { try emit(initializer) }
             else { operations.append(.constant(defaultValue(for: type))) }
-            operations.append(.store(slot: try slot(name)))
-        case .assignment(let name, let value, _):
-            try emit(value); operations.append(.store(slot: try slot(name)))
+            operations.append(.store(slot: symbol.slot))
+        case .assignment(let symbol, let value, _):
+            try emit(value); operations.append(.store(slot: symbol.slot))
         case .block(let nodes, _):
             for node in nodes { try emit(node) }
         case .program(let declarations, let body, _):
@@ -127,8 +135,8 @@ public final class IRLowerer {
             operations.append(.label(end))
         case .print(let expression, _):
             try emit(expression); operations.append(.print)
-        case .read(let name, _):
-            operations.append(.read(slot: try slot(name)))
+        case .read(let symbol, _):
+            operations.append(.read(slot: symbol.slot))
         case .expressionStatement(let expression, _):
             try emit(expression); operations.append(.discard)
         case .functionDecl:
@@ -140,14 +148,23 @@ public final class IRLowerer {
             if let value { try emit(value) }
             else { operations.append(.constant(.null)) }
             operations.append(.returnValue(hasValue: true))
+        case .typeDecl:
+            break
+        case .arrayLiteral(let elements, _):
+            for element in elements { try emit(element) }
+            operations.append(.buildArray(count: elements.count))
+        case .index(let collection, let index, _):
+            try emit(collection); try emit(index); operations.append(.loadIndex)
+        case .indexAssignment(let symbol, let index, let value, _):
+            try emit(index); try emit(value); operations.append(.storeIndex(slot: symbol.slot))
+        case .recordLiteral(let name, let fields, _):
+            for field in fields { try emit(field.value) }
+            operations.append(.buildRecord(name: name, fields: fields.map(\.name)))
+        case .member(let base, let name, _):
+            try emit(base); operations.append(.loadField(name))
+        case .memberAssignment(let symbol, let field, let value, _):
+            try emit(value); operations.append(.storeField(slot: symbol.slot, field: field))
         }
-    }
-
-    private func slot(_ name: String) throws -> Int {
-        guard let slot = slots[name] else {
-            throw Diagnostic(stage: .lowering, message: "No storage assigned to '\(name)'")
-        }
-        return slot
     }
     private func defaultValue(for type: TypeInfo) -> Value {
         switch type {
@@ -156,6 +173,8 @@ public final class IRLowerer {
         case .string: return .string("")
         case .boolean: return .boolean(false)
         case .null, .any: return .null
+        case .array: return .array([])
+        case .record(let name): return .record(name: name, fields: [:])
         }
     }
 }

@@ -1,3 +1,11 @@
+//
+//  Frontend.swift
+//  Compiler
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import Foundation
 
 public struct SyntaxToken: Equatable, Sendable {
@@ -33,7 +41,22 @@ public protocol SyntaxTreeAdapter {
     func adapt(_ tree: ExternalTree) throws -> SyntaxNode
 }
 
-public enum ASTAction: Equatable, Sendable {
+public struct ASTParameterAction: Codable, Equatable, Sendable {
+    public let nameChild: Int
+    public let type: String
+    public init(nameChild: Int, type: String) { self.nameChild = nameChild; self.type = type }
+}
+
+public struct ASTFieldAction: Codable, Equatable, Sendable {
+    public let nameChild: Int
+    public let valueChild: Int?
+    public let type: String?
+    public init(nameChild: Int, valueChild: Int? = nil, type: String? = nil) {
+        self.nameChild = nameChild; self.valueChild = valueChild; self.type = type
+    }
+}
+
+public enum ASTAction: Codable, Equatable, Sendable {
     case passThrough
     case integer
     case floatingPoint
@@ -43,11 +66,41 @@ public enum ASTAction: Equatable, Sendable {
     case identifier
     case unary(operatorChild: Int, operandChild: Int)
     case binary(leftChild: Int, operatorChild: Int, rightChild: Int)
+    case program(declarationChildren: [Int], bodyChild: Int)
+    case block(children: [Int])
+    case variableDeclaration(nameChild: Int, initializerChild: Int?, type: String?)
+    case assignment(nameChild: Int, valueChild: Int)
+    case print(valueChild: Int)
+    case read(nameChild: Int)
+    case expressionStatement(valueChild: Int)
+    case ifStatement(conditionChild: Int, thenChild: Int, elseChild: Int?)
+    case whileStatement(conditionChild: Int, bodyChild: Int)
+    case functionDeclaration(nameChild: Int, parameters: [ASTParameterAction], returnType: String, bodyChild: Int)
+    case call(nameChild: Int, argumentChildren: [Int])
+    case returnStatement(valueChild: Int?)
+    case typeDeclaration(nameChild: Int, fields: [ASTFieldAction])
+    case arrayLiteral(children: [Int])
+    case index(collectionChild: Int, indexChild: Int)
+    case indexAssignment(nameChild: Int, indexChild: Int, valueChild: Int)
+    case recordLiteral(nameChild: Int, fields: [ASTFieldAction])
+    case member(baseChild: Int, nameChild: Int)
+    case memberAssignment(variableChild: Int, fieldChild: Int, valueChild: Int)
 }
 
-public struct ASTMapping: Sendable {
+public struct ASTMapping: Codable, Sendable {
+    public static let formatVersion = 1
+    public let version: Int
     public let actions: [String: ASTAction]
-    public init(actions: [String: ASTAction]) { self.actions = actions }
+    public init(version: Int = formatVersion, actions: [String: ASTAction]) {
+        self.version = version; self.actions = actions
+    }
+
+    public init(json data: Data) throws {
+        self = try JSONDecoder().decode(ASTMapping.self, from: data)
+        guard version == Self.formatVersion else {
+            throw Diagnostic(stage: .parsing, message: "Unsupported AST action format version \(version)")
+        }
+    }
 
     public static let expressions = ASTMapping(actions: [
         "expression": .passThrough,
@@ -107,7 +160,73 @@ public final class ASTBuilder {
                 right: try build(from: node.children[rightChild]),
                 type: .any
             )
+        case .program(let declarations, let body):
+            return .program(declarations: try declarations.map { try build(from: child($0, node)) },
+                            body: try build(from: child(body, node)), type: .null)
+        case .block(let children):
+            return .block(try children.map { try build(from: child($0, node)) }, type: .null)
+        case .variableDeclaration(let name, let initializer, let type):
+            return .varDecl(name: try token(name, node), initializer: try initializer.map { try build(from: child($0, node)) },
+                            type: try parsedType(type) ?? .any)
+        case .assignment(let name, let value):
+            return .assignment(variable: try token(name, node), value: try build(from: child(value, node)), type: .null)
+        case .print(let value): return .print(try build(from: child(value, node)), type: .null)
+        case .read(let name): return .read(name: try token(name, node), type: .null)
+        case .expressionStatement(let value): return .expressionStatement(try build(from: child(value, node)), type: .null)
+        case .ifStatement(let condition, let thenChild, let elseChild):
+            return .ifStmt(condition: try build(from: child(condition, node)),
+                           thenBranch: try build(from: child(thenChild, node)),
+                           elseBranch: try elseChild.map { try build(from: child($0, node)) }, type: .null)
+        case .whileStatement(let condition, let body):
+            return .whileStmt(condition: try build(from: child(condition, node)),
+                              body: try build(from: child(body, node)), type: .null)
+        case .functionDeclaration(let name, let parameters, let returnType, let body):
+            return .functionDecl(name: try token(name, node),
+                parameters: try parameters.map { FunctionParameter(name: try token($0.nameChild, node), type: try parsedType($0.type)!) },
+                returnType: try parsedType(returnType)!, body: try build(from: child(body, node)), type: .null)
+        case .call(let name, let arguments):
+            return .call(name: try token(name, node), arguments: try arguments.map { try build(from: child($0, node)) }, type: .any)
+        case .returnStatement(let value):
+            return .returnStmt(try value.map { try build(from: child($0, node)) }, type: .null)
+        case .typeDeclaration(let name, let fields):
+            return .typeDecl(name: try token(name, node), fields: try fields.map {
+                guard let type = try parsedType($0.type) else { throw shape(node, "a field type") }
+                return TypeField(name: try token($0.nameChild, node), type: type)
+            }, type: .null)
+        case .arrayLiteral(let children):
+            return .arrayLiteral(try children.map { try build(from: child($0, node)) }, type: .any)
+        case .index(let collection, let index):
+            return .index(collection: try build(from: child(collection, node)), index: try build(from: child(index, node)), type: .any)
+        case .indexAssignment(let name, let index, let value):
+            return .indexAssignment(variable: try token(name, node), index: try build(from: child(index, node)),
+                                    value: try build(from: child(value, node)), type: .null)
+        case .recordLiteral(let name, let fields):
+            return .recordLiteral(name: try token(name, node), fields: try fields.map {
+                guard let value = $0.valueChild else { throw shape(node, "a record field value") }
+                return RecordFieldInitializer(name: try token($0.nameChild, node), value: try build(from: child(value, node)))
+            }, type: .record(try token(name, node)))
+        case .member(let base, let name):
+            return .member(base: try build(from: child(base, node)), name: try token(name, node), type: .any)
+        case .memberAssignment(let variable, let field, let value):
+            return .memberAssignment(variable: try token(variable, node), field: try token(field, node),
+                                     value: try build(from: child(value, node)), type: .null)
         }
+    }
+
+    private func child(_ index: Int, _ node: SyntaxNode) throws -> SyntaxNode {
+        guard node.children.indices.contains(index) else { throw shape(node, "child \(index)") }
+        return node.children[index]
+    }
+    private func token(_ index: Int, _ node: SyntaxNode) throws -> String {
+        guard let text = try child(index, node).token?.lexeme else { throw shape(node, "token child \(index)") }
+        return text
+    }
+    private func parsedType(_ text: String?) throws -> TypeInfo? {
+        guard let text else { return nil }
+        guard let type = TypeInfo.parse(text) else {
+            throw Diagnostic(stage: .parsing, message: "Invalid type '\(text)' in AST action")
+        }
+        return type
     }
 
     private func shape(_ node: SyntaxNode, _ expected: String) -> Diagnostic {
@@ -144,8 +263,9 @@ public final class SourceParser {
         var declarations: [ASTNode] = []
         var statements: [ASTNode] = []
         while !atEnd {
-            if match("var") { declarations.append(try variableDeclaration()) }
+            if match("var") { statements.append(try variableDeclaration()) }
             else if match("func") { declarations.append(try functionDeclaration()) }
+            else if match("type") { declarations.append(try typeDeclaration()) }
             else { statements.append(try statement()) }
         }
         return .program(declarations: declarations, body: .block(statements, type: .null), type: .null)
@@ -164,9 +284,7 @@ public final class SourceParser {
         let name = try consumeIdentifier("Expected variable name")
         var declaredType: TypeInfo = .any
         if match(":") {
-            let typeName = try consumeIdentifier("Expected type name")
-            guard let type = TypeInfo(rawValue: typeName) else { throw error("Unknown type '\(typeName)'") }
-            declaredType = type
+            declaredType = try parseType()
         }
         let initializer = match("=") ? try expression() : nil
         try consume(";", "Expected ';' after declaration")
@@ -181,20 +299,16 @@ public final class SourceParser {
             repeat {
                 let parameterName = try consumeIdentifier("Expected parameter name")
                 try consume(":", "Expected ':' after parameter name")
-                let typeName = try consumeIdentifier("Expected parameter type")
-                guard let type = TypeInfo(rawValue: typeName), type != .any else {
-                    throw error("Unknown parameter type '\(typeName)'")
-                }
+                let type = try parseType()
+                guard type != .any else { throw error("'any' is not a valid parameter type") }
                 parameters.append(FunctionParameter(name: parameterName, type: type))
             } while match(",")
         }
         try consume(")", "Expected ')' after parameters")
         var returnType: TypeInfo = .null
         if match(":") {
-            let typeName = try consumeIdentifier("Expected return type")
-            guard let type = TypeInfo(rawValue: typeName), type != .any else {
-                throw error("Unknown return type '\(typeName)'")
-            }
+            let type = try parseType()
+            guard type != .any else { throw error("'any' is not a valid return type") }
             returnType = type
         }
         return .functionDecl(
@@ -204,6 +318,30 @@ public final class SourceParser {
             body: try block(),
             type: .null
         )
+    }
+
+    private func typeDeclaration() throws -> ASTNode {
+        let name = try consumeIdentifier("Expected type name")
+        try consume("{", "Expected '{' after type name")
+        var fields: [TypeField] = []
+        while !check("}") {
+            let field = try consumeIdentifier("Expected field name")
+            try consume(":", "Expected ':' after field name")
+            fields.append(TypeField(name: field, type: try parseType()))
+            try consume(";", "Expected ';' after field")
+        }
+        try consume("}", "Expected '}' after type declaration")
+        return .typeDecl(name: name, fields: fields, type: .null)
+    }
+
+    private func parseType() throws -> TypeInfo {
+        let name = try consumeIdentifier("Expected type name")
+        guard var type = TypeInfo.parse(name) else { throw error("Invalid type '\(name)'") }
+        while match("[") {
+            try consume("]", "Expected ']' in array type")
+            type = .array(type)
+        }
+        return type
     }
 
     private func statement() throws -> ASTNode {
@@ -244,6 +382,24 @@ public final class SourceParser {
             try consume(";", "Expected ';' after assignment")
             return .assignment(variable: name, value: value, type: .null)
         }
+        if current.kind == .identifier, peek.text == "[" {
+            let name = advance().text
+            _ = advance()
+            let index = try expression()
+            try consume("]", "Expected ']' after index")
+            try consume("=", "Expected '=' after indexed target")
+            let value = try expression()
+            try consume(";", "Expected ';' after assignment")
+            return .indexAssignment(variable: name, index: index, value: value, type: .null)
+        }
+        if current.kind == .identifier, peek.text == "." {
+            let name = advance().text; _ = advance()
+            let field = try consumeIdentifier("Expected field name")
+            try consume("=", "Expected '=' after field")
+            let value = try expression()
+            try consume(";", "Expected ';' after assignment")
+            return .memberAssignment(variable: name, field: field, value: value, type: .null)
+        }
         let value = try expression()
         try consume(";", "Expected ';' after expression")
         return .expressionStatement(value, type: .null)
@@ -277,7 +433,21 @@ public final class SourceParser {
 
     private func unary() throws -> ASTNode {
         if match("-") { return .unary(op: "-", operand: try unary(), type: .any) }
-        return try primary()
+        return try postfix()
+    }
+
+    private func postfix() throws -> ASTNode {
+        var node = try primary()
+        while true {
+            if match("[") {
+                let index = try expression()
+                try consume("]", "Expected ']' after index")
+                node = .index(collection: node, index: index, type: .any)
+            } else if match(".") {
+                node = .member(base: node, name: try consumeIdentifier("Expected field name"), type: .any)
+            } else { break }
+        }
+        return node
     }
 
     private func primary() throws -> ASTNode {
@@ -292,6 +462,18 @@ public final class SourceParser {
             case "false": return .booleanLiteral(false, type: .boolean)
             case "null": return .nullLiteral(type: .null)
             default:
+                if match("{") {
+                    var fields: [RecordFieldInitializer] = []
+                    if !check("}") {
+                        repeat {
+                            let name = try consumeIdentifier("Expected field name")
+                            try consume(":", "Expected ':' after field name")
+                            fields.append(RecordFieldInitializer(name: name, value: try expression()))
+                        } while match(",")
+                    }
+                    try consume("}", "Expected '}' after record literal")
+                    return .recordLiteral(name: token.text, fields: fields, type: .record(token.text))
+                }
                 if match("(") {
                     var arguments: [ASTNode] = []
                     if !check(")") {
@@ -306,6 +488,13 @@ public final class SourceParser {
             let node = try expression()
             try consume(")", "Expected ')' after expression")
             return node
+        case .symbol where token.text == "[":
+            var elements: [ASTNode] = []
+            if !check("]") {
+                repeat { elements.append(try expression()) } while match(",")
+            }
+            try consume("]", "Expected ']' after array literal")
+            return .arrayLiteral(elements, type: .any)
         default: throw Diagnostic(stage: .parsing, message: "Expected expression, got '\(token.text)'", range: token.range)
         }
     }
@@ -388,7 +577,7 @@ public final class SourceParser {
             if ["==", "!=", "<=", ">="].contains(two) {
                 offset += 2; column += 2
                 result.append(Token(kind: .symbol, text: two, range: range(start)))
-            } else if "{}();,:+-*/%=<>".contains(c) {
+            } else if "{}[]().;,:+-*/%=<>".contains(c) {
                 offset += 1; column += 1
                 result.append(Token(kind: .symbol, text: String(c), range: range(start)))
             } else {

@@ -1,3 +1,11 @@
+//
+//  CodeGenerator.swift
+//  Compiler
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import Foundation
 
 public struct StackCompilation: Equatable, Sendable {
@@ -57,6 +65,15 @@ public enum StackCodeGenerator {
                 ))
             case .returnValue:
                 code.append(Instruction(.return))
+            case .buildArray(let count):
+                code.append(Instruction(.buildArray, [.int(Int64(count))]))
+            case .loadIndex: code.append(Instruction(.loadIndex))
+            case .storeIndex(let slot): code.append(Instruction(.storeIndex, [.int(Int64(slot))]))
+            case .buildRecord(let name, let fields):
+                code.append(Instruction(.buildRecord, [.string(name)] + fields.map(Value.string)))
+            case .loadField(let field): code.append(Instruction(.loadField, [.string(field)]))
+            case .storeField(let slot, let field):
+                code.append(Instruction(.storeField, [.int(Int64(slot)), .string(field)]))
             case .halt: code.append(Instruction(.halt))
             }
         }
@@ -99,6 +116,10 @@ private struct RegisterPool {
             break
         }
     }
+    mutating func allocateSpill() -> RegisterOperand {
+        if let spill = freeSpills.popLast() { return .spill(spill) }
+        defer { nextSpill += 1 }; return .spill(nextSpill)
+    }
 }
 
 public enum RegisterCodeGenerator {
@@ -110,6 +131,9 @@ public enum RegisterCodeGenerator {
             else {
                 switch operation {
                 case .read: emitted += 2
+                case .call(_, let count): emitted += count * 2 + 2
+                case .returnValue: emitted += 2
+                case .halt: emitted += 2
                 default: emitted += 1
                 }
             }
@@ -174,17 +198,78 @@ public enum RegisterCodeGenerator {
             case .discard:
                 try require(1, operation: "discard")
                 pool.release(stack.removeLast())
-            case .call, .returnValue:
-                throw Diagnostic(
-                    stage: .lowering,
-                    message: "Function calls currently target the stack machine; select the stack backend"
-                )
-            case .halt:
-                if let result = stack.last, result != .register(0) {
-                    code.append(Instruction3(.move, destination: .register(0), source1: result))
-                } else if stack.isEmpty {
-                    code.append(Instruction3(.move, destination: .register(0), source1: .immediate(.null)))
+            case .call(let name, let argumentCount):
+                guard argumentCount <= 8,
+                      let function = program.functions.first(where: { $0.name == name }),
+                      function.parameterSlots.count == argumentCount else {
+                    throw Diagnostic(stage: .lowering, message: "Register calls support at most eight arguments")
                 }
+                try require(argumentCount, operation: "call")
+                let arguments = Array(stack.suffix(argumentCount))
+                stack.removeLast(argumentCount)
+                var temporaries: [RegisterOperand] = []
+                for argument in arguments {
+                    let temporary = pool.allocateSpill()
+                    code.append(Instruction3(.move, destination: temporary, source1: argument))
+                    temporaries.append(temporary)
+                    pool.release(argument)
+                }
+                for (index, temporary) in temporaries.enumerated() {
+                    code.append(Instruction3(.move, destination: .register(index), source1: temporary))
+                    pool.release(temporary)
+                }
+                code.append(Instruction3(
+                    .call,
+                    destination: .immediate(.int(Int64(try target(function.entry, labels)))),
+                    extraOperands: function.parameterSlots.map { .immediate(.int(Int64($0))) }
+                ))
+                let result = pool.allocate()
+                code.append(Instruction3(.move, destination: result, source1: .register(0)))
+                stack.append(result)
+            case .returnValue:
+                try require(1, operation: "return")
+                let result = stack.removeLast()
+                code.append(Instruction3(.move, destination: .register(0), source1: result))
+                pool.release(result)
+                code.append(Instruction3(.return, source1: .register(0)))
+            case .buildArray(let count):
+                try require(count, operation: "array literal")
+                let values = Array(stack.suffix(count)); stack.removeLast(count)
+                let destination = pool.allocate()
+                code.append(Instruction3(.buildArray, destination: destination, extraOperands: values))
+                values.forEach { pool.release($0) }; stack.append(destination)
+            case .loadIndex:
+                try require(2, operation: "index")
+                let index = stack.removeLast(), collection = stack.removeLast(), destination = pool.allocate()
+                code.append(Instruction3(.loadIndex, destination: destination, source1: collection, source2: index))
+                pool.release(collection); pool.release(index); stack.append(destination)
+            case .storeIndex(let slot):
+                try require(2, operation: "indexed assignment")
+                let value = stack.removeLast(), index = stack.removeLast()
+                code.append(Instruction3(.storeIndex, destination: .immediate(.int(Int64(slot))), source1: index, source2: value))
+                pool.release(index); pool.release(value)
+            case .buildRecord(let name, let fields):
+                try require(fields.count, operation: "record literal")
+                let values = Array(stack.suffix(fields.count)); stack.removeLast(fields.count)
+                let destination = pool.allocate()
+                var extras: [RegisterOperand] = [.immediate(.string(name))]
+                for (field, value) in zip(fields, values) {
+                    extras.append(.immediate(.string(field))); extras.append(value)
+                }
+                code.append(Instruction3(.buildRecord, destination: destination, extraOperands: extras))
+                values.forEach { pool.release($0) }; stack.append(destination)
+            case .loadField(let field):
+                try require(1, operation: "field access")
+                let base = stack.removeLast(), destination = pool.allocate()
+                code.append(Instruction3(.loadField, destination: destination, source1: base, source2: .immediate(.string(field))))
+                pool.release(base); stack.append(destination)
+            case .storeField(let slot, let field):
+                try require(1, operation: "field assignment")
+                let value = stack.removeLast()
+                code.append(Instruction3(.storeField, destination: .immediate(.int(Int64(slot))), source1: .immediate(.string(field)), source2: value))
+                pool.release(value)
+            case .halt:
+                code.append(Instruction3(.move, destination: .register(0), source1: stack.last ?? .immediate(.null)))
                 code.append(Instruction3(.halt))
             }
         }

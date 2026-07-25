@@ -1,3 +1,11 @@
+//
+//  Definitions.swift
+//  comp
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import ArgumentParser
 import Compiler
 

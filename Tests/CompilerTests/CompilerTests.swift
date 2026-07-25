@@ -50,6 +50,16 @@ struct FrontendTests {
         }
     }
 
+    @Test func ASTActionFormatRoundTripsAsJSON() throws {
+        let mapping = ASTMapping(actions: [
+            "integer": .integer,
+            "print": .print(valueChild: 1),
+            "program": .block(children: [0]),
+        ])
+        let data = try JSONEncoder().encode(mapping)
+        #expect(try ASTMapping(json: data).actions == mapping.actions)
+    }
+
     @Test func adaptsGeneralizedParserTrees() throws {
         let grammar = try Grammar(
             bnf: """
@@ -70,6 +80,14 @@ struct FrontendTests {
 
 @Suite("Semantic analysis")
 struct SemanticTests {
+    @Test func resolvesShadowedNamesToDistinctSymbols() throws {
+        let artifacts = try Compiler().analyze(try SourceParser().parse(
+            "var x: int = 1; { var x: int = 2; print x; } print x;"
+        ))
+        #expect(artifacts.symbols.map(\.name) == ["x", "x"])
+        #expect(Set(artifacts.symbols.map(\.id)).count == 2)
+        #expect(artifacts.symbols.map(\.slot) == [0, 1])
+    }
     @Test func infersDeclarationType() throws {
         let ast = try SourceParser().parse("var x = 3; print x;")
         let artifacts = try Compiler().analyze(ast)
@@ -209,6 +227,44 @@ struct CodeGenerationTests {
 
 @Suite("Execution")
 struct ExecutionTests {
+    @Test func registerBackendSupportsRecursiveCalls() throws {
+        let source = """
+        func factorial(n: int): int {
+            if (n <= 1) { return 1; }
+            return n * factorial(n - 1);
+        }
+        print factorial(6);
+        """
+        let artifacts = try Compiler().analyze(try SourceParser().parse(source))
+        let compilation = try RegisterCodeGenerator.generate(artifacts.ir)
+        final class Box: @unchecked Sendable { var values: [String] = [] }
+        let output = Box()
+        _ = try RegisterMachine(bytecode: compilation.instructions, localCount: compilation.localCount,
+                                output: { output.values.append($0) }).execute()
+        #expect(output.values == ["720"])
+    }
+
+    @Test func arraysAndRecordsWorkOnBothBackends() throws {
+        let source = """
+        type Point { x: int; y: int; }
+        var values: int[] = [2, 3, 4];
+        values[1] = 7;
+        var point: Point = Point { x: values[0], y: values[1] };
+        point.x = point.x + 5;
+        print point.x + point.y;
+        """
+        let artifacts = try Compiler().analyze(try SourceParser().parse(source))
+        let stack = try StackCodeGenerator.generate(artifacts.ir)
+        let registers = try RegisterCodeGenerator.generate(artifacts.ir)
+        final class Box: @unchecked Sendable { var values: [String] = [] }
+        let a = Box(), b = Box()
+        _ = try StackMachine(bytecode: stack.instructions, localCount: stack.localCount,
+                             output: { a.values.append($0) }).execute()
+        _ = try RegisterMachine(bytecode: registers.instructions, localCount: registers.localCount,
+                                output: { b.values.append($0) }).execute()
+        #expect(a.values == ["14"])
+        #expect(b.values == a.values)
+    }
     @Test func stackAndRegisterMachinesAgree() throws {
         let source = """
         var x: int = 1;

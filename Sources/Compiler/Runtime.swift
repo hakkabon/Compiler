@@ -1,3 +1,11 @@
+//
+//  Runtime.swift
+//  Compiler
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import Foundation
 
 public typealias InputProvider = @Sendable () throws -> String
@@ -150,6 +158,35 @@ public final class StackMachine {
                 stack.append(result)
                 ip = frame.returnIP
                 continue
+            case .buildArray:
+                let count = Int(instruction.operands[0].intValue!)
+                var values = try (0..<count).map { _ in try pop() }
+                values.reverse(); stack.append(.array(values))
+            case .loadIndex:
+                let index = try pop(), collection = try pop()
+                guard case .int(let raw) = index, case .array(let values) = collection,
+                      raw >= 0, raw < values.count else { throw Diagnostic(stage: .runtime, message: "Invalid array index") }
+                stack.append(values[Int(raw)])
+            case .storeIndex:
+                let slot = Int(instruction.operands[0].intValue!), value = try pop(), index = try pop()
+                guard case .int(let raw) = index, case .array(var values) = locals[slot],
+                      raw >= 0, raw < values.count else { throw Diagnostic(stage: .runtime, message: "Invalid array index") }
+                values[Int(raw)] = value; locals[slot] = .array(values)
+            case .buildRecord:
+                guard case .string(let name) = instruction.operands[0] else { throw Diagnostic(stage: .runtime, message: "Invalid record metadata") }
+                let names = instruction.operands.dropFirst().compactMap { if case .string(let name) = $0 { return name }; return nil }
+                var values = try names.map { _ in try pop() }; values.reverse()
+                stack.append(.record(name: name, fields: Dictionary(uniqueKeysWithValues: zip(names, values))))
+            case .loadField:
+                guard case .string(let field) = instruction.operands[0], case .record(_, let fields) = try pop(),
+                      let value = fields[field] else { throw Diagnostic(stage: .runtime, message: "Invalid field access") }
+                stack.append(value)
+            case .storeField:
+                let slot = Int(instruction.operands[0].intValue!)
+                guard case .string(let field) = instruction.operands[1], case .record(let name, var fields) = locals[slot] else {
+                    throw Diagnostic(stage: .runtime, message: "Invalid field assignment")
+                }
+                fields[field] = try pop(); locals[slot] = .record(name: name, fields: fields)
             case .halt: return stack.last ?? .null
             }
             ip += 1
@@ -180,13 +217,14 @@ public final class RegisterMachine {
     private func run(trace: OutputHandler?) throws -> Value? {
         try BytecodeValidator.validate(code, localCount: localCount)
         var ip = 0, registers = Array(repeating: Value.null, count: 32), locals = Array(repeating: Value.null, count: localCount)
-        let spillCount = code.flatMap { [$0.destination, $0.source1, $0.source2] }
+        let spillCount = code.flatMap { [$0.destination, $0.source1, $0.source2] + $0.extraOperands.map(Optional.some) }
             .compactMap { operand -> Int? in
                 guard case .spill(let slot) = operand else { return nil }
                 return slot
             }
             .max().map { $0 + 1 } ?? 0
         var spills = Array(repeating: Value.null, count: spillCount)
+        var frames: [(returnIP: Int, locals: [Value], registers: [Value], spills: [Value])] = []
         func value(_ operand: RegisterOperand?) throws -> Value {
             guard let operand else { throw Diagnostic(stage: .runtime, message: "Missing register operand") }
             switch operand {
@@ -237,6 +275,56 @@ public final class RegisterMachine {
             case .readInt:
                 guard let value = Int64(try input()) else { throw Diagnostic(stage: .runtime, message: "Expected integer input") }
                 try write(instruction.destination, .int(value))
+            case .call:
+                let target = try immediateInt(instruction.destination)
+                let slots = try instruction.extraOperands.map { try immediateInt($0) }
+                frames.append((ip + 1, locals, registers, spills))
+                for (argument, slot) in zip(registers.prefix(slots.count), slots) { locals[slot] = argument }
+                ip = target; continue
+            case .return:
+                let result = try value(instruction.source1)
+                guard let frame = frames.popLast() else { throw Diagnostic(stage: .runtime, message: "Return without a call frame") }
+                locals = frame.locals; registers = frame.registers; spills = frame.spills; registers[0] = result
+                ip = frame.returnIP; continue
+            case .buildArray:
+                try write(instruction.destination, .array(try instruction.extraOperands.map(value)))
+            case .loadIndex:
+                guard case .array(let values) = try value(instruction.source1),
+                      case .int(let raw) = try value(instruction.source2), raw >= 0, raw < values.count else {
+                    throw Diagnostic(stage: .runtime, message: "Invalid array index")
+                }
+                try write(instruction.destination, values[Int(raw)])
+            case .storeIndex:
+                let slot = try immediateInt(instruction.destination)
+                guard case .array(var values) = locals[slot], case .int(let raw) = try value(instruction.source1),
+                      raw >= 0, raw < values.count else { throw Diagnostic(stage: .runtime, message: "Invalid array index") }
+                values[Int(raw)] = try value(instruction.source2); locals[slot] = .array(values)
+            case .buildRecord:
+                guard case .immediate(.string(let name)) = instruction.extraOperands.first else {
+                    throw Diagnostic(stage: .runtime, message: "Invalid record metadata")
+                }
+                var fields: [String: Value] = [:]
+                var i = 1
+                while i + 1 < instruction.extraOperands.count {
+                    guard case .immediate(.string(let field)) = instruction.extraOperands[i] else {
+                        throw Diagnostic(stage: .runtime, message: "Invalid record field metadata")
+                    }
+                    fields[field] = try value(instruction.extraOperands[i + 1]); i += 2
+                }
+                try write(instruction.destination, .record(name: name, fields: fields))
+            case .loadField:
+                guard case .record(_, let fields) = try value(instruction.source1),
+                      case .immediate(.string(let field)) = instruction.source2, let result = fields[field] else {
+                    throw Diagnostic(stage: .runtime, message: "Invalid field access")
+                }
+                try write(instruction.destination, result)
+            case .storeField:
+                let slot = try immediateInt(instruction.destination)
+                guard case .record(let name, var fields) = locals[slot],
+                      case .immediate(.string(let field)) = instruction.source1 else {
+                    throw Diagnostic(stage: .runtime, message: "Invalid field assignment")
+                }
+                fields[field] = try value(instruction.source2); locals[slot] = .record(name: name, fields: fields)
             case .halt: return registers[0]
             }
             ip += 1

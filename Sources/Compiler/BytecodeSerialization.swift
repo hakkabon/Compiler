@@ -1,3 +1,11 @@
+//
+//  BytecodeSerialization.swift
+//  Compiler
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import Foundation
 
 public enum BytecodeImage: Equatable, Sendable {
@@ -12,7 +20,7 @@ public enum BytecodeImage: Equatable, Sendable {
 /// instruction count, then target-specific instructions. Multibyte integers
 /// use big-endian byte order and strings use UTF-8 with a UInt32 byte length.
 public enum BytecodeSerializer {
-    public static let formatVersion: UInt8 = 1
+    public static let formatVersion: UInt8 = 2
 
     public static func encode(_ image: BytecodeImage) throws -> Data {
         var writer = BinaryWriter()
@@ -39,6 +47,8 @@ public enum BytecodeSerializer {
                 try writer.operand(instruction.destination)
                 try writer.operand(instruction.source1)
                 try writer.operand(instruction.source2)
+                writer.uint32(try checked(instruction.extraOperands.count))
+                for operand in instruction.extraOperands { try writer.operand(operand) }
             }
         }
         return writer.data
@@ -82,7 +92,8 @@ public enum BytecodeSerializer {
                     opcode,
                     destination: try reader.operand(),
                     source1: try reader.operand(),
-                    source2: try reader.operand()
+                    source2: try reader.operand(),
+                    extraOperands: try (0..<reader.count()).compactMap { _ in try reader.operand() }
                 ))
             }
             try reader.requireEnd()
@@ -101,7 +112,7 @@ public enum BytecodeSerializer {
         try decode(Data(contentsOf: url))
     }
 
-    private static func checked(_ value: Int) throws -> UInt32 {
+    fileprivate static func checked(_ value: Int) throws -> UInt32 {
         guard value >= 0, let result = UInt32(exactly: value) else {
             throw format("Count \(value) does not fit the bytecode format")
         }
@@ -144,6 +155,12 @@ private struct BinaryWriter {
             uint32(count); bytes(utf8)
         case .boolean(let boolean): byte(3); byte(boolean ? 1 : 0)
         case .null: byte(4)
+        case .array(let values):
+            byte(5); uint32(try BytecodeSerializer.checked(values.count))
+            for value in values { try self.value(value) }
+        case .record(let name, let fields):
+            byte(6); try self.value(.string(name)); uint32(try BytecodeSerializer.checked(fields.count))
+            for key in fields.keys.sorted() { try self.value(.string(key)); try self.value(fields[key]!) }
         }
     }
     mutating func operand(_ operand: RegisterOperand?) throws {
@@ -210,6 +227,16 @@ private struct BinaryReader {
             guard raw <= 1 else { throw BytecodeSerializer.format("Invalid Boolean") }
             return .boolean(raw == 1)
         case 4: return .null
+        case 5: return .array(try (0..<count()).map { _ in try value() })
+        case 6:
+            guard case .string(let name) = try value() else { throw BytecodeSerializer.format("Invalid record name") }
+            var fields: [String: Value] = [:]
+            let fieldCount = try count()
+            for _ in 0..<fieldCount {
+                guard case .string(let field) = try value() else { throw BytecodeSerializer.format("Invalid field name") }
+                fields[field] = try value()
+            }
+            return .record(name: name, fields: fields)
         default: throw BytecodeSerializer.format("Unknown value tag")
         }
     }

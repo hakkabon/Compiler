@@ -1,3 +1,11 @@
+//
+//  IRControlFlow.swift
+//  Compiler
+//
+//  Created by Ulf Akerstedt-Inoue on 2026/07/25.
+//  Copyright © 2026 hakkabon software. All rights reserved.
+//
+
 import Foundation
 
 public struct IRBasicBlock: Equatable, Sendable {
