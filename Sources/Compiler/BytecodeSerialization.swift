@@ -34,7 +34,7 @@ public enum BytecodeSerializer {
             writer.uint32(try checked(compilation.instructions.count))
             for instruction in compilation.instructions {
                 writer.byte(instruction.opcode.rawValue)
-                writer.byte(UInt8(instruction.operands.count))
+                writer.byte(try checkedByte(instruction.operands.count, label: "Operand count"))
                 for operand in instruction.operands { try writer.value(operand) }
             }
         case .register(let compilation):
@@ -88,12 +88,24 @@ public enum BytecodeSerializer {
                 guard let opcode = RegisterOpcode(rawValue: try reader.byte()) else {
                     throw format("Unknown register opcode")
                 }
+                let destination = try reader.operand()
+                let source1 = try reader.operand()
+                let source2 = try reader.operand()
+                let extraCount = try reader.count()
+                var extraOperands: [RegisterOperand] = []
+                extraOperands.reserveCapacity(extraCount)
+                for _ in 0..<extraCount {
+                    guard let operand = try reader.operand() else {
+                        throw format("A variadic register operand cannot be absent")
+                    }
+                    extraOperands.append(operand)
+                }
                 code.append(Instruction3(
                     opcode,
-                    destination: try reader.operand(),
-                    source1: try reader.operand(),
-                    source2: try reader.operand(),
-                    extraOperands: try (0..<reader.count()).compactMap { _ in try reader.operand() }
+                    destination: destination,
+                    source1: source1,
+                    source2: source2,
+                    extraOperands: extraOperands
                 ))
             }
             try reader.requireEnd()
@@ -115,6 +127,13 @@ public enum BytecodeSerializer {
     fileprivate static func checked(_ value: Int) throws -> UInt32 {
         guard value >= 0, let result = UInt32(exactly: value) else {
             throw format("Count \(value) does not fit the bytecode format")
+        }
+        return result
+    }
+
+    private static func checkedByte(_ value: Int, label: String) throws -> UInt8 {
+        guard value >= 0, let result = UInt8(exactly: value) else {
+            throw format("\(label) \(value) does not fit the bytecode format")
         }
         return result
     }
