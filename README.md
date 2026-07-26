@@ -10,6 +10,12 @@ language implementation techniques. Its `comp` executable is also an
 integration harness for the companion Grammar, Lexer, Parser, Earley, CYK, and
 RNGLR packages.
 
+[![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://swift.org)  
+[![Platforms](https://img.shields.io/badge/platforms-macOS%2011%20%7C%20iOS%2014-blue.svg)](https://developer.apple.com/swift/)  
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)  
+
+---
+
 ## Features
 
 - source lexer and recursive-descent/precedence parser;
@@ -555,3 +561,9 @@ the exact tested revisions.
 
 Potential extensions are nested l-values, methods, modules, closures, and a
 liveness-based allocator. These are deliberately outside the compact core.
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.  
