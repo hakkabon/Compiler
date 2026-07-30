@@ -10,25 +10,19 @@ language implementation techniques. Its `comp` executable is also an
 integration harness for the companion Grammar, Lexer, Parser, Earley, CYK, and
 RNGLR packages.
 
-[![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://swift.org)  
-[![Platforms](https://img.shields.io/badge/platforms-macOS%2011%20%7C%20iOS%2014-blue.svg)](https://developer.apple.com/swift/)  
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)  
-
----
-
 ## Features
 
 - source lexer and recursive-descent/precedence parser;
 - concrete adapter for the shared generalized-parser `ParseTree`;
 - selectable Earley, CYK, and RNGLR parsing from the command line;
 - selectable hand-written tokenizer or DFA Lexer frontend;
-- versioned JSON syntax-tree-to-AST actions covering the complete language AST;
-- separate source and resolved typed ASTs;
+- declarative syntax-tree-to-AST actions;
+- one AST for expressions, declarations, statements, and programs;
 - source-located lexer, parser, semantic, lowering, validation, and runtime
   diagnostics;
-- static primitive, array, and named record types;
+- static types for integers, floats, strings, Booleans, and null;
 - declarations, initialization, assignment, blocks, `if`/`else`, `while`,
-  functions, recursive calls, arrays, records, returns, `print`, and integer `read`;
+  functions, recursive calls, returns, `print`, and integer `read`;
 - stable symbol identities and distinct local storage slots;
 - shared, backend-neutral IR with symbolic labels and basic-block CFGs;
 - stack and 32-register bytecode targets;
@@ -60,11 +54,11 @@ flowchart LR
     RegisterCheck --> RegisterVM["RegisterMachine"]
 ```
 
-Without `--actions`, the external parser validates the source and the compact
-compiler-owned parser builds the language AST. With `--actions`, `ASTBuilder`
-constructs that AST directly from the selected external parse tree. Semantic
-analysis then produces a distinct `ResolvedASTNode` tree in which every
-variable occurrence contains its `SymbolID` and storage slot.
+The external parser first validates the source and exposes its derivations for
+inspection and ambiguity handling. The compiler-owned `SourceParser` then
+builds the language AST. This deliberate two-step design lets `comp` exercise
+arbitrary Grammar/Lexer/Parser combinations without making compiler semantics
+depend on grammar-specific production names.
 
 ## Language
 
@@ -77,8 +71,6 @@ variable occurrence contains its `SymbolID` and storage slot.
 | `string`    | `TypeInfo.string`  | `Value.string(String)` |
 | `boolean`   | `TypeInfo.boolean` | `Value.boolean(Bool)`  |
 | `null`      | `TypeInfo.null`    | `Value.null`           |
-| `T[]`       | `TypeInfo.array`   | `Value.array`          |
-| named type  | `TypeInfo.record`  | `Value.record`         |
 
 `TypeInfo.any` is an unresolved AST annotation used before semantic analysis.
 It is not a runtime type.
@@ -129,16 +121,6 @@ func factorial(n: int): int {
 }
 
 print factorial(5);
-
-type Point {
-    x: int;
-    y: int;
-}
-var points: Point[] = [
-    Point { x: 1, y: 2 },
-    Point { x: 3, y: 4 }
-];
-points[0].x; // nested reads are supported
 ```
 
 Semicolons terminate declarations, assignments, I/O statements, and expression
@@ -179,7 +161,6 @@ comp <grammar-file> <source-file>
   [--lexer tokenizer|dfa]
   [--ambiguity reject|first|all]
   [--target stack|register]
-  [--actions <mapping.json>]
   [--emit grammar tokens trees ast typed-ast ir bytecode result ...]
   [--parse-only]
   [--trace]
@@ -189,29 +170,6 @@ comp <grammar-file> <source-file>
 The grammar notation defaults to the grammar file extension. `--start` is
 required for BNF, EBNF, and WSN; `.gen` grammars carry their own start
 declaration.
-
-`--actions` changes the integration from “validate externally, parse with the
-built-in parser” to “compile the external parse tree directly.” The mapping is
-a Codable JSON document with `version: 1` and an `actions` dictionary keyed by
-grammar rule. `ASTAction` includes actions for every compiler AST construct:
-programs, blocks, literals, operators, declarations, control flow, functions,
-calls, returns, arrays, indexing, named types, records, and member access.
-Child numbers refer to the adapted `SyntaxNode.children` array. The Codable
-representation can be generated reliably in Swift:
-
-```swift
-let mapping = ASTMapping(actions: [
-    "integer": .integer,
-    "sum": .binary(leftChild: 0, operatorChild: 1, rightChild: 2),
-    "statement": .print(valueChild: 1),
-    "program": .block(children: [0]),
-])
-let data = try JSONEncoder().encode(mapping)
-```
-
-Pass the resulting file with `--actions mapping.json`. Keeping the mapping
-outside the grammar makes grammar experimentation possible without coupling
-the compiler core to any particular production names.
 
 The default `--lexer tokenizer` path exercises GrammarTokenizer through each
 parser's standard interface. `--lexer dfa` constructs a DFA lexer from the
@@ -246,10 +204,9 @@ swift run comp grammar.bnf source.comp --start program \
 ```
 
 By default ambiguous input is rejected. `first` selects the first deduplicated
-derivation, while `all` adapts and prints every derivation. Without
-`--actions`, compilation uses the built-in language parser and the supplied
-grammar should recognize the same language. With `--actions`, the first
-selected external derivation is the source of the compiler AST.
+derivation, while `all` adapts and prints every derivation. Compilation still
+uses the compiler language parser; the supplied grammar should therefore
+recognize the same source language when running beyond `--parse-only`.
 
 ## Library usage
 
@@ -365,7 +322,6 @@ instead of unchecked child indexing.
 - symbolic labels and conditional/unconditional jumps;
 - print, read, discard, and halt.
 - function calls and returns.
-- array construction/indexing and named-record construction/field access.
 
 Both code generators consume this IR. Control-flow lowering therefore has one
 implementation, and label resolution happens independently for each concrete
@@ -403,10 +359,9 @@ The generator uses 32 physical registers and reuses temporaries. When pressure
 exceeds the register file, additional values are assigned explicit spill slots
 (`S0`, `S1`, …), which the register VM stores separately.
 
-The register calling convention supports up to eight arguments. Arguments are
-placed in `R0` through `R7`, the return value is placed in `R0`, and `call`
-preserves the caller's registers, spill locations, and locals. Consequently,
-direct calls, nested calls, and recursion behave identically on both targets.
+Functions currently compile to stack bytecode because call frames are a
+stack-machine feature. Selecting the register target for a program containing
+calls produces a clear lowering diagnostic.
 
 ### Validation
 
@@ -431,7 +386,7 @@ produce validation diagnostics rather than force-unwrap traps.
 `BytecodeSerializer` encodes either target as a `.cmpb` image with:
 
 - magic bytes `CMPB`;
-- format version `2`;
+- format version `1`;
 - target and local-count metadata;
 - big-endian integer encoding;
 - UTF-8 length-prefixed strings;
@@ -504,10 +459,6 @@ The Swift Testing suite covers:
 - repeatable machine execution;
 - stack/register behavioral equivalence;
 - recursive function call frames;
-- recursive register calls and calling-convention preservation;
-- resolved symbol identity and lexical shadowing;
-- arrays, indexing, records, and field mutation on both targets;
-- JSON AST-action encoding;
 - CFG formation and type-state rejection;
 - register spilling;
 - stack/register serialization round trips.
@@ -538,32 +489,32 @@ the exact tested revisions.
 ## Current limitations and roadmap
 
 - The built-in source parser intentionally implements a small language.
-- External parse trees require a grammar-specific `ASTMapping`; the compiler
-  cannot infer the intended semantics of arbitrary production names.
+- External parse trees are used for validation, diagnostics, ambiguity
+  inspection, and frontend testing. Turning arbitrary grammar productions
+  directly into language semantics still requires an `ASTMapping`.
 - The DFA grammar-to-lexer bridge supports literal, list, range, and regular
   expression terminals. A literal double quote cannot currently be represented
   by the Lexer-FSA escape syntax used by the bridge.
 - DFA mode currently pairs with Earley; CYK's natural-tree transformer and
   RNGLR's token-stream entry point are not public in forms that can be composed
   this way.
-- Register calls are intentionally limited to eight arguments.
-- Aggregate mutation currently targets a named variable (`a[i] = value` and
-  `record.field = value`); mutation through an arbitrarily nested l-value is
-  not implemented.
-- Empty array literals have element type `any` until assigned to a declared
-  array type.
-- Modules, closures, captured variables, methods, and recursive structural
-  type definitions are not implemented.
+- Lexical shadowing is rejected, and parameter names must presently be unique
+  across the program, because AST references do not yet carry resolved symbol
+  IDs.
+- Function calls and recursion use stack-machine call frames; the register
+  backend reports calls as unsupported.
+- User-defined types, arrays, modules, closures, and captured variables are not
+  implemented.
 - Register spills are explicit VM locations rather than loads/stores inserted
   by a liveness-based allocator.
 - The bytecode format is versioned but not promised ABI-stable across a future
   major format version.
 
-Potential extensions are nested l-values, methods, modules, closures, and a
-liveness-based allocator. These are deliberately outside the compact core.
-
----
+The next useful work is resolved-symbol IDs in the typed AST, register-machine
+calling conventions, user-defined aggregate types, and a grammar action format
+capable of constructing the complete compiler AST directly from external parse
+trees.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.  
+MIT License — see [LICENSE](LICENSE) for details.
