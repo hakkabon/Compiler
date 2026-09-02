@@ -11,13 +11,13 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.2"),
-        .package(url: "https://github.com/hakkabon/Grammar.git", branch: "main"),
-        .package(url: "https://github.com/hakkabon/Parser.git", branch: "main"),
-        .package(url: "https://github.com/hakkabon/Lexer.git", branch: "main"),
-        .package(url: "https://github.com/hakkabon/Lexer-FSA.git", branch: "main"),
-        .package(url: "https://github.com/hakkabon/Earley-Parser.git", branch: "main"),
-        .package(url: "https://github.com/hakkabon/CYK-Parser.git", branch: "main"),
-        .package(url: "https://github.com/hakkabon/RNGLR-Parser.git", branch: "main"),
+        .package(url: "https://github.com/hakkabon/Grammar.git", revision: "69f85d7a493e1862412c34493e3656e94331df06"),
+        .package(url: "https://github.com/hakkabon/Parser.git", revision: "3663097550f3ed1b8dcad8a26f4c2c55cc61b4e1"),
+        .package(url: "https://github.com/hakkabon/Lexer.git", revision: "efac321be75676bdb88a447f7ea0dd9d1b3bb851"),
+        .package(url: "https://github.com/hakkabon/Lexer-FSA.git", revision: "5289a38e507bbf63863699a1eb9ac7a4d19aafba"),
+        .package(url: "https://github.com/hakkabon/Earley-Parser.git", revision: "7e1845c9531274ecab8201db5613eb10e149a5e2"),
+        .package(url: "https://github.com/hakkabon/CYK-Parser.git", revision: "5c375aea8c68edd5b344f89c38cc33668a49d1cd"),
+        .package(url: "https://github.com/hakkabon/RNGLR-Parser.git", revision: "d16e7910f6e807d66b54acf5848f894bebf9bc5b"),
     ],
     targets: [
         .target(
