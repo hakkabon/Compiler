@@ -8,6 +8,7 @@ let package = Package(
     platforms: [.macOS(.v13), .iOS(.v14)],
     products: [
         .library(name: "Compiler", targets: ["Compiler"]),
+        .executable(name: "compiler-conformance", targets: ["compiler-conformance"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.2"),
@@ -32,10 +33,25 @@ let package = Package(
             name: "CompilerTests",
             dependencies: [
                 "Compiler",
+                "CompilerConformance",
                 .product(name: "Grammar", package: "Grammar"),
                 .product(name: "Parser", package: "Parser"),
                 .product(name: "Earley-Parser", package: "Earley-Parser"),
             ]
+        ),
+        .target(
+            name: "CompilerConformance",
+            dependencies: [
+                "Compiler",
+                .product(name: "Grammar", package: "Grammar"),
+                .product(name: "Lexer", package: "Lexer"),
+                .product(name: "Parser", package: "Parser"),
+                .product(name: "Earley-Parser", package: "Earley-Parser"),
+            ]
+        ),
+        .executableTarget(
+            name: "compiler-conformance",
+            dependencies: ["CompilerConformance"]
         ),
         .executableTarget(
             name: "comp",

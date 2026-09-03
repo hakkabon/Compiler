@@ -32,6 +32,13 @@ RNGLR packages.
 - injectable input, output, and trace handlers;
 - public compilation artifacts for inspecting the typed AST, symbols, and IR;
 - unit, integration, negative, and cross-backend equivalence tests.
+- a non-terminal `compiler-conformance` adapter for the shared ecosystem corpus.
+
+The conformance adapter consumes normalized token kinds, recognizes them through
+Compiler's existing Earley integration, and passes successful shared parse trees
+through `GeneralizedParseTreeAdapter`. Recovery cases are emitted as explicit
+unsupported observations because Compiler's generalized-parser boundary does not
+currently expose a recovery policy; they are never silently skipped.
 
 ## Architecture
 

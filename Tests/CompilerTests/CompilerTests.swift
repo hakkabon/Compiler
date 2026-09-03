@@ -1,8 +1,55 @@
 import Foundation
 import Testing
 @testable import Compiler
+@testable import CompilerConformance
 import Earley_Parser
 import Grammar
+
+@Suite("Ecosystem conformance")
+struct EcosystemConformanceTests {
+    @Test func evaluatesNormalizedTokensAndReportsUnsupportedRecovery() throws {
+        let corpus = """
+        {
+          "schemaVersion": 1,
+          "grammars": [{
+            "id": "sample",
+            "start": "S",
+            "terminals": ["VALUE", "COMMA"],
+            "precedence": [],
+            "productions": [
+              {"lhs": "S", "rhs": []},
+              {"lhs": "S", "rhs": ["VALUE"]}
+            ]
+          }],
+          "cases": [
+            {"id": "empty", "grammar": "sample", "input": "", "expectedTokenKinds": [], "expectedStatus": "accepted", "tags": ["epsilon"]},
+            {"id": "value", "grammar": "sample", "input": "value", "expectedTokenKinds": ["VALUE"], "expectedStatus": "accepted", "tags": ["literal"]},
+            {"id": "rejected", "grammar": "sample", "input": "value,", "expectedTokenKinds": ["VALUE", "COMMA"], "expectedStatus": "rejected", "tags": ["malformed-input"]},
+            {"id": "recovery", "grammar": "sample", "input": "value,", "expectedTokenKinds": ["VALUE", "COMMA"], "expectedStatus": "acceptedWithRecovery", "tags": ["recovery"]}
+          ]
+        }
+        """
+
+        let observations = try CompilerCorpusConformance.evaluate(Data(corpus.utf8))
+        #expect(observations.map(\.id) == ["empty", "value", "rejected", "recovery"])
+        #expect(observations.map(\.status) == ["accepted", "accepted", "rejected", "rejected"])
+        #expect(observations.map(\.supported) == [true, true, true, false])
+        #expect(observations.last?.reason?.contains("syntax recovery") == true)
+    }
+
+    @Test func rejectsUnknownGrammarReferences() {
+        let corpus = """
+        {
+          "schemaVersion": 1,
+          "grammars": [],
+          "cases": [{"id": "case", "grammar": "missing", "input": "", "expectedTokenKinds": [], "expectedStatus": "accepted", "tags": ["epsilon"]}]
+        }
+        """
+        #expect(throws: (any Error).self) {
+            _ = try CompilerCorpusConformance.evaluate(Data(corpus.utf8))
+        }
+    }
+}
 
 @Suite("Frontend")
 struct FrontendTests {
