@@ -36,9 +36,11 @@ RNGLR packages.
 
 The conformance adapter consumes normalized token kinds, recognizes them through
 Compiler's existing Earley integration, and passes successful shared parse trees
-through `GeneralizedParseTreeAdapter`. Recovery cases are emitted as explicit
-unsupported observations because Compiler's generalized-parser boundary does not
-currently expose a recovery policy; they are never silently skipped.
+through `GeneralizedParseTreeAdapter`. Corpus versions 1 and 2 are accepted;
+version-2 observations also expose the normalized tree root. Recovery cases are
+emitted as explicit unsupported observations because Compiler's
+generalized-parser boundary does not currently expose a recovery policy; they are
+never silently skipped.
 
 ## Architecture
 

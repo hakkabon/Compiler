@@ -8,6 +8,7 @@ import Parser
 public struct CompilerCorpusObservation: Codable, Equatable, Sendable {
     public let id: String
     public let status: String
+    public let root: String?
     public let supported: Bool
     public let diagnostics: Int
     public let reason: String?
@@ -15,12 +16,14 @@ public struct CompilerCorpusObservation: Codable, Equatable, Sendable {
     public init(
         id: String,
         status: String,
+        root: String? = nil,
         supported: Bool,
         diagnostics: Int,
         reason: String? = nil
     ) {
         self.id = id
         self.status = status
+        self.root = root
         self.supported = supported
         self.diagnostics = diagnostics
         self.reason = reason
@@ -30,7 +33,7 @@ public struct CompilerCorpusObservation: Codable, Equatable, Sendable {
 public enum CompilerCorpusConformance {
     public static func evaluate(_ data: Data) throws -> [CompilerCorpusObservation] {
         let corpus = try JSONDecoder().decode(Corpus.self, from: data)
-        guard corpus.schemaVersion == 1 else {
+        guard (1...2).contains(corpus.schemaVersion) else {
             throw ConformanceError("unsupported corpus schema version \(corpus.schemaVersion)")
         }
 
@@ -57,6 +60,7 @@ public enum CompilerCorpusConformance {
     private static func evaluate(_ testCase: CorpusCase, with grammar: Grammar) -> CompilerCorpusObservation {
         let stream = NormalizedTokenStream(kinds: testCase.expectedTokenKinds)
         let status: String
+        let root: String?
         let diagnostics: Int
 
         do {
@@ -69,13 +73,16 @@ public enum CompilerCorpusConformance {
                 )
                 _ = try GeneralizedParseTreeAdapter(source: stream.source).adapt(tree)
                 status = "accepted"
+                root = tree.root?.name ?? grammar.start.name
                 diagnostics = 0
             } else {
                 status = "rejected"
+                root = nil
                 diagnostics = 1
             }
         } catch {
             status = "rejected"
+            root = nil
             diagnostics = 1
         }
 
@@ -83,6 +90,7 @@ public enum CompilerCorpusConformance {
             return CompilerCorpusObservation(
                 id: testCase.id,
                 status: status,
+                root: root,
                 supported: false,
                 diagnostics: diagnostics,
                 reason: "Compiler's generalized-parser integration does not expose syntax recovery."
@@ -92,6 +100,7 @@ public enum CompilerCorpusConformance {
         return CompilerCorpusObservation(
             id: testCase.id,
             status: status,
+            root: root,
             supported: true,
             diagnostics: diagnostics
         )

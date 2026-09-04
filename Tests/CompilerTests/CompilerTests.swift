@@ -10,15 +10,15 @@ struct EcosystemConformanceTests {
     @Test func evaluatesNormalizedTokensAndReportsUnsupportedRecovery() throws {
         let corpus = """
         {
-          "schemaVersion": 1,
+          "schemaVersion": 2,
           "grammars": [{
             "id": "sample",
             "start": "S",
             "terminals": ["VALUE", "COMMA"],
             "precedence": [],
             "productions": [
-              {"lhs": "S", "rhs": []},
-              {"lhs": "S", "rhs": ["VALUE"]}
+              {"id": "sample-empty", "lhs": "S", "rhs": []},
+              {"id": "sample-value", "lhs": "S", "rhs": ["VALUE"]}
             ]
           }],
           "cases": [
@@ -34,6 +34,7 @@ struct EcosystemConformanceTests {
         #expect(observations.map(\.id) == ["empty", "value", "rejected", "recovery"])
         #expect(observations.map(\.status) == ["accepted", "accepted", "rejected", "rejected"])
         #expect(observations.map(\.supported) == [true, true, true, false])
+        #expect(observations.map(\.root) == ["S", "S", nil, nil])
         #expect(observations.last?.reason?.contains("syntax recovery") == true)
     }
 
