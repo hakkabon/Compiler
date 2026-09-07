@@ -27,7 +27,7 @@ let package = Package(
                 .product(name: "Grammar", package: "Grammar"),
                 .product(name: "Parser", package: "Parser"),
                 .product(name: "Lexer", package: "Lexer"),
-            ],
+            ]
         ),
         .testTarget(
             name: "CompilerTests",
