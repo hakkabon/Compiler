@@ -491,9 +491,10 @@ Direct dependencies are:
 - [RNGLR-Parser](https://github.com/hakkabon/RNGLR-Parser)
 - [swift-argument-parser](https://github.com/apple/swift-argument-parser)
 
-The hakkabon packages currently track their `main` branches so this repository
-can exercise their latest implementations together. `Package.resolved` records
-the exact tested revisions.
+The hakkabon packages use compatible tagged releases; `Package.resolved`
+records the exact revisions tested together. Compiler 0.1.6 raises its RNGLR
+floor to 0.2.1 so external-parser validation receives deterministic complete
+ambiguous forests.
 
 ## Current limitations and roadmap
 
