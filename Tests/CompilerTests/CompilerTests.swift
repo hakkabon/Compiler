@@ -4,6 +4,7 @@ import Testing
 @testable import CompilerConformance
 import Earley_Parser
 import Grammar
+import Parser
 
 @Suite("Ecosystem conformance")
 struct EcosystemConformanceTests {
@@ -412,5 +413,53 @@ struct ExecutionTests {
         """
         _ = try Compiler().execute(source, output: { box.values.append($0) })
         #expect(box.values == ["120"])
+    }
+
+    @Test func comparesSemanticValuesAcrossParserEngines() throws {
+        let source = "42"
+        let tree = ParseTree.node(
+            NonTerminal(name: "Expression"),
+            children: [.leaf(source.startIndex..<source.endIndex)]
+        )
+        let mapping = ASTMapping(actions: [
+            "Expression": .passThrough,
+            "terminal": .integer,
+        ])
+        let report = CompilerSemanticConvergence.evaluate(
+            source: source,
+            inputs: [
+                .init(engine: "earley", parseStatus: .accepted, trees: [tree]),
+                .init(engine: "lr1", parseStatus: .accepted, trees: [tree]),
+            ],
+            mapping: mapping
+        )
+
+        #expect(report.schemaVersion == 1)
+        #expect(report.agreement == .complete)
+        #expect(report.observations.map(\.values) == [[.integer(42)], [.integer(42)]])
+        let encoded = try JSONEncoder().encode(report)
+        #expect(encoded.isEmpty == false)
+        #expect(try JSONDecoder().decode(CompilerSemanticConvergenceReport.self, from: encoded) == report)
+    }
+
+    @Test func distinguishesMissingTreesAndSemanticFailures() {
+        let source = "x"
+        let tree = ParseTree.node(
+            NonTerminal(name: "Expression"),
+            children: [.leaf(source.startIndex..<source.endIndex)]
+        )
+        let report = CompilerSemanticConvergence.evaluate(
+            source: source,
+            inputs: [
+                .init(engine: "rejected", parseStatus: .rejected, trees: []),
+                .init(engine: "empty", parseStatus: .accepted, trees: []),
+                .init(engine: "bad-mapping", parseStatus: .accepted, trees: [tree]),
+            ],
+            mapping: ASTMapping(actions: ["Expression": .passThrough])
+        )
+
+        #expect(report.agreement == .inconclusive)
+        #expect(report.observations.map(\.status) == [.parseRejected, .noSyntaxTree, .failed])
+        #expect(report.observations.last?.diagnostics.first?.stage == "parsing")
     }
 }

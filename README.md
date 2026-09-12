@@ -42,6 +42,13 @@ emitted as explicit unsupported observations because Compiler's
 generalized-parser boundary does not currently expose a recovery policy; they are
 never silently skipped.
 
+`CompilerSemanticConvergence` is the semantic ownership boundary for parser
+experiments. Callers provide each engine's shared `ParseTree` values and one
+versioned `ASTMapping`; Compiler alone adapts, builds, type-checks, lowers, and
+executes every derivation. Its schema-1 report preserves distinct semantic
+values and stable diagnostics, distinguishing structural parser differences
+that mean the same thing from genuine semantic divergence.
+
 ## Architecture
 
 ```mermaid
@@ -492,7 +499,7 @@ Direct dependencies are:
 - [swift-argument-parser](https://github.com/apple/swift-argument-parser)
 
 The hakkabon packages use compatible tagged releases; `Package.resolved`
-records the exact revisions tested together. Compiler 0.1.7 accepts shared
+records the exact revisions tested together. Compiler 0.2.0 accepts shared
 corpus v4; the preceding 0.1.6 release raised its RNGLR floor to 0.2.1 so
 external-parser validation receives deterministic complete ambiguous forests.
 

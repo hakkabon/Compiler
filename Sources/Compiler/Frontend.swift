@@ -87,7 +87,7 @@ public enum ASTAction: Codable, Equatable, Sendable {
     case memberAssignment(variableChild: Int, fieldChild: Int, valueChild: Int)
 }
 
-public struct ASTMapping: Codable, Sendable {
+public struct ASTMapping: Codable, Equatable, Sendable {
     public static let formatVersion = 1
     public let version: Int
     public let actions: [String: ASTAction]
