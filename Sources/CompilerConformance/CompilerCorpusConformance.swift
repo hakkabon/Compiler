@@ -33,7 +33,7 @@ public struct CompilerCorpusObservation: Codable, Equatable, Sendable {
 public enum CompilerCorpusConformance {
     public static func evaluate(_ data: Data) throws -> [CompilerCorpusObservation] {
         let corpus = try JSONDecoder().decode(Corpus.self, from: data)
-        guard (1...3).contains(corpus.schemaVersion) else {
+        guard (1...4).contains(corpus.schemaVersion) else {
             throw ConformanceError("unsupported corpus schema version \(corpus.schemaVersion)")
         }
 
