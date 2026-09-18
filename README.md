@@ -36,8 +36,8 @@ RNGLR packages.
 
 The conformance adapter consumes normalized token kinds, recognizes them through
 Compiler's existing Earley integration, and passes successful shared parse trees
-through `GeneralizedParseTreeAdapter`. Corpus versions 1 and 2 are accepted;
-version-2 observations also expose the normalized tree root. Recovery cases are
+through `GeneralizedParseTreeAdapter`. Corpus versions 1 through 5 are accepted;
+observations expose the normalized tree root. Recovery cases are
 emitted as explicit unsupported observations because Compiler's
 generalized-parser boundary does not currently expose a recovery policy; they are
 never silently skipped.
@@ -499,8 +499,9 @@ Direct dependencies are:
 - [swift-argument-parser](https://github.com/apple/swift-argument-parser)
 
 The hakkabon packages use compatible tagged releases; `Package.resolved`
-records the exact revisions tested together. Compiler 0.2.0 accepts shared
-corpus v4; the preceding 0.1.6 release raised its RNGLR floor to 0.2.1 so
+records the exact revisions tested together. The next compatibility release
+accepts shared corpus v5 while retaining explicit unsupported recovery
+observations. Compiler 0.2.0 accepted v4; the preceding 0.1.6 release raised its RNGLR floor to 0.2.1 so
 external-parser validation receives deterministic complete ambiguous forests.
 
 ## Current limitations and roadmap

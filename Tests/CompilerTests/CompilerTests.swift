@@ -11,7 +11,7 @@ struct EcosystemConformanceTests {
     @Test func evaluatesNormalizedTokensAndReportsUnsupportedRecovery() throws {
         let corpus = """
         {
-          "schemaVersion": 4,
+          "schemaVersion": 5,
           "grammars": [{
             "id": "sample",
             "start": "S",
