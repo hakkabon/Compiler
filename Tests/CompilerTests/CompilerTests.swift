@@ -434,9 +434,15 @@ struct ExecutionTests {
             mapping: mapping
         )
 
-        #expect(report.schemaVersion == 1)
+        #expect(report.schemaVersion == 2)
         #expect(report.agreement == .complete)
+        #expect(report.ambiguity == .syntacticallyUnambiguous)
         #expect(report.observations.map(\.values) == [[.integer(42)], [.integer(42)]])
+        #expect(report.observations.allSatisfy {
+            $0.ambiguity == .syntacticallyUnambiguous
+                && $0.derivations?.count == 1
+                && $0.derivations?.first?.value == .integer(42)
+        })
         let encoded = try JSONEncoder().encode(report)
         #expect(encoded.isEmpty == false)
         #expect(try JSONDecoder().decode(CompilerSemanticConvergenceReport.self, from: encoded) == report)
@@ -461,5 +467,144 @@ struct ExecutionTests {
         #expect(report.agreement == .inconclusive)
         #expect(report.observations.map(\.status) == [.parseRejected, .noSyntaxTree, .failed])
         #expect(report.observations.last?.diagnostics.first?.stage == "parsing")
+    }
+
+    @Test func preservesSemanticallyDivergentAmbiguousDerivations() throws {
+        let source = "8-3-2"
+        func range(_ offset: Int) -> Range<String.Index> {
+            let start = source.index(source.startIndex, offsetBy: offset)
+            return start..<source.index(after: start)
+        }
+        func integer(_ offset: Int) -> ParseTree {
+            .node(NonTerminal(name: "Integer"), children: [.leaf(range(offset))])
+        }
+        let minus = { (offset: Int) in ParseTree.leaf(range(offset)) }
+        let left = ParseTree.node(NonTerminal(name: "Expression"), children: [
+            .node(NonTerminal(name: "Expression"), children: [integer(0), minus(1), integer(2)]),
+            minus(3), integer(4),
+        ])
+        let right = ParseTree.node(NonTerminal(name: "Expression"), children: [
+            integer(0), minus(1),
+            .node(NonTerminal(name: "Expression"), children: [integer(2), minus(3), integer(4)]),
+        ])
+        let mapping = ASTMapping(actions: [
+            "Expression": .binary(leftChild: 0, operatorChild: 1, rightChild: 2),
+            "Integer": .passThrough,
+            "terminal": .integer,
+        ])
+        let report = CompilerSemanticConvergence.evaluate(
+            source: source,
+            inputs: [
+                .init(engine: "earley", parseStatus: .accepted, trees: [left, right]),
+                .init(engine: "rnglr", parseStatus: .accepted, trees: [right, left]),
+            ],
+            mapping: mapping
+        )
+
+        #expect(report.agreement == .complete)
+        #expect(report.ambiguity == .semanticallyDivergent)
+        #expect(report.observations.allSatisfy {
+            $0.ambiguity == .semanticallyDivergent
+                && $0.derivationCount == 2
+                && Set($0.values) == [.integer(3), .integer(7)]
+                && $0.derivations?.compactMap(\.value).count == 2
+        })
+        #expect(try JSONDecoder().decode(
+            CompilerSemanticConvergenceReport.self,
+            from: JSONEncoder().encode(report)
+        ) == report)
+    }
+
+    @Test func retainsSuccessfulDerivationsWhenAnotherSemanticPathFails() {
+        let source = "42"
+        let valid = ParseTree.node(
+            NonTerminal(name: "Expression"),
+            children: [.leaf(source.startIndex..<source.endIndex)]
+        )
+        let invalid = ParseTree.node(
+            NonTerminal(name: "Unknown"),
+            children: [.leaf(source.startIndex..<source.endIndex)]
+        )
+        let report = CompilerSemanticConvergence.evaluate(
+            source: source,
+            inputs: [.init(engine: "earley", parseStatus: .accepted, trees: [valid, invalid])],
+            mapping: ASTMapping(actions: [
+                "Expression": .passThrough,
+                "terminal": .integer,
+            ])
+        )
+        let observation = report.observations[0]
+
+        #expect(report.agreement == .inconclusive)
+        #expect(report.ambiguity == .unresolved)
+        #expect(observation.status == .partiallyEvaluated)
+        #expect(observation.values == [.integer(42)])
+        #expect(observation.diagnostics.count == 1)
+        #expect(observation.derivations?.map(\.index) == [0, 1])
+    }
+
+    @Test func distinguishesEquivalentSyntaxAmbiguityFromValueDivergence() {
+        let source = "42"
+        let leaf = ParseTree.leaf(source.startIndex..<source.endIndex)
+        let direct = ParseTree.node(
+            NonTerminal(name: "Expression"),
+            children: [.node(NonTerminal(name: "Integer"), children: [leaf])]
+        )
+        let wrapped = ParseTree.node(
+            NonTerminal(name: "Expression"),
+            children: [.node(
+                NonTerminal(name: "Wrapped"),
+                children: [.node(NonTerminal(name: "Integer"), children: [leaf])]
+            )]
+        )
+        let report = CompilerSemanticConvergence.evaluate(
+            source: source,
+            inputs: [.init(engine: "earley", parseStatus: .accepted, trees: [direct, wrapped])],
+            mapping: ASTMapping(actions: [
+                "Expression": .passThrough,
+                "Wrapped": .passThrough,
+                "Integer": .passThrough,
+                "terminal": .integer,
+            ])
+        )
+
+        #expect(report.ambiguity == .semanticallyEquivalent)
+        #expect(report.observations[0].ambiguity == .semanticallyEquivalent)
+        #expect(report.observations[0].values == [.integer(42)])
+        #expect(Set(report.observations[0].derivations?.map(\.syntaxFingerprint) ?? []).count == 2)
+    }
+
+    @Test func decodesLegacySemanticReportsWithoutInventingDerivationEvidence() throws {
+        let data = Data("""
+        {
+          "schemaVersion": 1,
+          "agreement": "complete",
+          "observations": [
+            {
+              "engine": "earley",
+              "status": "evaluated",
+              "derivationCount": 1,
+              "values": [{"kind": "integer", "integer": 42}],
+              "diagnostics": []
+            },
+            {
+              "engine": "lr1",
+              "status": "evaluated",
+              "derivationCount": 1,
+              "values": [{"kind": "integer", "integer": 42}],
+              "diagnostics": []
+            }
+          ]
+        }
+        """.utf8)
+        let report = try JSONDecoder().decode(CompilerSemanticConvergenceReport.self, from: data)
+
+        #expect(report.schemaVersion == 1)
+        #expect(report.ambiguity == nil)
+        #expect(report.observations.allSatisfy { $0.ambiguity == nil && $0.derivations == nil })
+        let encoded = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any]
+        )
+        #expect(encoded["ambiguity"] == nil)
     }
 }

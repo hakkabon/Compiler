@@ -49,6 +49,13 @@ executes every derivation. Its schema-1 report preserves distinct semantic
 values and stable diagnostics, distinguishing structural parser differences
 that mean the same thing from genuine semantic divergence.
 
+Compiler 0.3.0 advances that boundary to report schema 2. Every parser
+derivation retains a stable syntax fingerprint and either its value or its
+diagnostic. Engine observations distinguish syntactically unambiguous,
+semantically equivalent, semantically divergent, and unresolved results; a
+failure in one derivation no longer discards successful alternatives. Schema-1
+reports remain decodable without inventing evidence they did not record.
+
 ## Architecture
 
 ```mermaid
