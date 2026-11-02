@@ -1,5 +1,9 @@
 # Compiler
 
+`CompilerIncrementalWorkspace` maintains separate identity-preserving arenas
+for typed semantic nodes and lowered IR fragments. Stable syntax IDs plus
+pass-specific fingerprints allow either layer to converge independently.
+
 A small compiler and bytecode interpreter written in Swift. It includes an
 end-to-end source pipeline, semantic analysis, a backend-neutral intermediate
 representation, stack and register bytecode targets, validation, and virtual
