@@ -4,6 +4,15 @@
 for typed semantic nodes and lowered IR fragments. Stable syntax IDs plus
 pass-specific fingerprints allow either layer to converge independently.
 
+`CompilerIncrementalSession` is the native incremental compilation boundary.
+Language kits submit top-level `CompilerIncrementalUnit` values whose IDs
+survive source relocation. Compiler derives symbol, function, and type
+dependencies, preserves reference identity for converged typed nodes, and
+lowers changed nodes into fragment-local IR. Public-signature fingerprints
+keep callers valid across body-only edits, while signature changes invalidate
+their dependants. Each update also reports shared `semanticNodes` and
+`irNodes` reuse measurements through `IncrementalExecutionEvidence`.
+
 A small compiler and bytecode interpreter written in Swift. It includes an
 end-to-end source pipeline, semantic analysis, a backend-neutral intermediate
 representation, stack and register bytecode targets, validation, and virtual

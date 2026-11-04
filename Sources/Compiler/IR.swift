@@ -95,6 +95,24 @@ public final class IRLowerer {
         return IRProgram(operations: operations, localCount: result.symbols.count, functions: functions)
     }
 
+    /// Lowers one stable semantic unit into a relocatable fragment. Labels are
+    /// local to the fragment; the canonical whole-program lowering remains the
+    /// executable artifact. This boundary lets editor clients retain IR object
+    /// identity without coupling code generation to source positions.
+    public func lowerFragment(_ node: ResolvedASTNode) throws -> [IROperation] {
+        operations = []
+        nextLabel = 0
+        functionLabels = [:]
+        if case .functionDecl(_, _, _, let body, _) = node {
+            try emit(body)
+            operations.append(.constant(.null))
+            operations.append(.returnValue(hasValue: true))
+        } else {
+            try emit(node)
+        }
+        return operations
+    }
+
     private func label() -> IRLabel { defer { nextLabel += 1 }; return IRLabel(nextLabel) }
 
     private func emit(_ node: ResolvedASTNode) throws {
