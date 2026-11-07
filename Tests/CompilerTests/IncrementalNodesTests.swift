@@ -1,5 +1,6 @@
 import XCTest
 import IncrementalParsing
+import Grammar
 @testable import Compiler
 
 final class IncrementalNodesTests: XCTestCase {
@@ -219,6 +220,55 @@ final class IncrementalNodesTests: XCTestCase {
         XCTAssertEqual(changed.semanticReuse.rebuilt, [unit.id])
         XCTAssertEqual(changed.irReuse.rebuilt, [unit.id])
         XCTAssertFalse(session.workspace.semantics[unit.id] === oldSemantic)
+    }
+
+    func testVerifiedGrammarChangeInvalidatesOnlyDependentSemantics() throws {
+        let old = try Grammar(bnf: """
+            S ::= B
+            B ::= 'b'
+            U ::= 'u'
+            """, start: "S")
+        let changed = try Grammar(bnf: """
+            S ::= B
+            B ::= 'b' | 'other'
+            U ::= 'u'
+            """, start: "S")
+        let affectedID = CompilerStableNodeID("affected")
+        let stableID = CompilerStableNodeID("stable")
+        func units(_ grammar: Grammar) -> [CompilerIncrementalUnit] {
+            [
+                .init(
+                    id: affectedID,
+                    ast: .print(.intLiteral(1, type: .int), type: .null),
+                    productionDependencies: [GrammarProductionID(grammar.productions[1])]),
+                .init(
+                    id: stableID,
+                    ast: .print(.intLiteral(2, type: .int), type: .null),
+                    productionDependencies: [GrammarProductionID(grammar.productions[2])]),
+            ]
+        }
+        let firstArtifact = IncrementalArtifactIdentity(
+            id: "compiler-language", revision: 1,
+            fingerprint: old.incrementalSemanticFingerprint)
+        let secondArtifact = IncrementalArtifactIdentity(
+            id: "compiler-language", revision: 2,
+            fingerprint: changed.incrementalSemanticFingerprint)
+        let session = CompilerIncrementalSession()
+        _ = try session.update(units(old), artifactIdentity: firstArtifact)
+        let stableNode = session.workspace.semantics[stableID]
+
+        let result = try session.update(
+            units(old),
+            artifactIdentity: secondArtifact,
+            grammarChange: old.changeSet(to: changed))
+
+        XCTAssertEqual(result.evidence.strategy, .incremental)
+        XCTAssertTrue(result.semanticReuse.rebuilt.contains(affectedID))
+        XCTAssertTrue(result.semanticReuse.reused.contains(stableID))
+        XCTAssertTrue(session.workspace.semantics[stableID] === stableNode)
+        XCTAssertNotNil(result.evidence.measurements.first {
+            $0.dimension == .grammarProductions
+        })
     }
 
     func testIncrementalEditCampaignMatchesFreshCompilation() throws {

@@ -1,4 +1,5 @@
 import Foundation
+import Grammar
 import IncrementalParsing
 
 public struct CompilerStableNodeID: Hashable, Sendable {
@@ -18,6 +19,9 @@ public struct CompilerNodeDependency: Hashable, Sendable {
     }
     public static func irNode(_ id: CompilerStableNodeID) -> Self {
         .init("ir:\(id.rawValue)")
+    }
+    public static func grammarProduction(_ id: GrammarProductionID) -> Self {
+        .init("grammar-production:\(id.rawValue)")
     }
 }
 
@@ -161,10 +165,16 @@ public final class CompilerIncrementalWorkspace {
 public struct CompilerIncrementalUnit: Equatable, Sendable {
     public let id: CompilerStableNodeID
     public let ast: ASTNode
+    public let productionDependencies: Set<GrammarProductionID>
 
-    public init(id: CompilerStableNodeID, ast: ASTNode) {
+    public init(
+        id: CompilerStableNodeID,
+        ast: ASTNode,
+        productionDependencies: Set<GrammarProductionID> = []
+    ) {
         self.id = id
         self.ast = ast
+        self.productionDependencies = productionDependencies
     }
 }
 
@@ -201,11 +211,27 @@ public final class CompilerIncrementalSession {
 
     public func update(
         _ units: [CompilerIncrementalUnit],
-        artifactIdentity nextArtifactIdentity: IncrementalArtifactIdentity? = nil
+        artifactIdentity nextArtifactIdentity: IncrementalArtifactIdentity? = nil,
+        grammarChange: GrammarChangeSet? = nil
     ) throws -> CompilerIncrementalResult {
+        var grammarDependencies = Set<CompilerNodeDependency>()
+        var grammarMeasurement: ReuseMeasurement?
         if hasBaseline, artifactIdentity != nextArtifactIdentity {
-            workspace.reset()
-            hasBaseline = false
+            if let grammarChange,
+               artifactIdentity?.fingerprint == grammarChange.sourceFingerprint,
+               nextArtifactIdentity?.fingerprint == grammarChange.targetFingerprint {
+                grammarDependencies = Set(grammarChange.invalidatedProductionIDs.map(
+                    CompilerNodeDependency.grammarProduction))
+                grammarMeasurement = .init(
+                    dimension: .grammarProductions,
+                    reused: grammarChange.retainedProductionIDs.count,
+                    rebuilt: grammarChange.addedProductionIDs.count,
+                    removed: grammarChange.removedProductionIDs.count,
+                    strategy: "structural-grammar-delta")
+            } else {
+                workspace.reset()
+                hasBaseline = false
+            }
         }
         let strategy: IncrementalExecutionStrategy = hasBaseline ? .incremental : .full
         var seen: Set<CompilerStableNodeID> = []
@@ -246,10 +272,14 @@ public final class CompilerIncrementalSession {
                 id: unit.id,
                 fingerprint: fingerprint,
                 payload: resolved,
-                dependencies: unit.ast.compilerDependencies,
+                dependencies: unit.ast.compilerDependencies.union(
+                    unit.productionDependencies.map(
+                        CompilerNodeDependency.grammarProduction)),
                 providedDependencies: provided)
         }
-        let semanticReuse = workspace.semantics.reconcile(semanticCandidates)
+        let semanticReuse = workspace.semantics.reconcile(
+            semanticCandidates,
+            changedDependencies: grammarDependencies)
 
         let fragmentLowerer = IRLowerer()
         let irCandidates = try units.map { unit -> CompilerNodeCandidate<[IROperation]> in
@@ -298,7 +328,7 @@ public final class CompilerIncrementalSession {
                         rebuilt: irReuse.rebuilt.count,
                         removed: irReuse.removed.count,
                         strategy: "relocatable-ir-fragment"),
-                ]))
+                ] + (grammarMeasurement.map { [$0] } ?? [])))
         hasBaseline = true
         artifactIdentity = nextArtifactIdentity
         return result
