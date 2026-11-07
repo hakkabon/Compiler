@@ -13,6 +13,13 @@ keep callers valid across body-only edits, while signature changes invalidate
 their dependants. Each update also reports shared `semanticNodes` and
 `irNodes` reuse measurements through `IncrementalExecutionEvidence`.
 
+`CompilerProjectSession` adds an atomic revisioned project boundary over that
+session. Stable modules declare direct imports, interface fingerprints prevent
+body-only edits from invalidating importers, interface changes invalidate the
+reverse-import closure, and equal canonical IR preserves
+the identity of `CompilerLinkedOutput`. Project evidence reports
+`compilerModules` and `linkedOutputs` separately from semantic and IR nodes.
+
 A small compiler and bytecode interpreter written in Swift. It includes an
 end-to-end source pipeline, semantic analysis, a backend-neutral intermediate
 representation, stack and register bytecode targets, validation, and virtual

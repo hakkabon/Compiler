@@ -20,6 +20,7 @@ public struct CompilerNodeDependency: Hashable, Sendable {
     public static func irNode(_ id: CompilerStableNodeID) -> Self {
         .init("ir:\(id.rawValue)")
     }
+    public static func module(_ name: String) -> Self { .init("module:\(name)") }
     public static func grammarProduction(_ id: GrammarProductionID) -> Self {
         .init("grammar-production:\(id.rawValue)")
     }
@@ -166,15 +167,18 @@ public struct CompilerIncrementalUnit: Equatable, Sendable {
     public let id: CompilerStableNodeID
     public let ast: ASTNode
     public let productionDependencies: Set<GrammarProductionID>
+    public let externalDependencies: Set<CompilerNodeDependency>
 
     public init(
         id: CompilerStableNodeID,
         ast: ASTNode,
-        productionDependencies: Set<GrammarProductionID> = []
+        productionDependencies: Set<GrammarProductionID> = [],
+        externalDependencies: Set<CompilerNodeDependency> = []
     ) {
         self.id = id
         self.ast = ast
         self.productionDependencies = productionDependencies
+        self.externalDependencies = externalDependencies
     }
 }
 
@@ -212,9 +216,10 @@ public final class CompilerIncrementalSession {
     public func update(
         _ units: [CompilerIncrementalUnit],
         artifactIdentity nextArtifactIdentity: IncrementalArtifactIdentity? = nil,
-        grammarChange: GrammarChangeSet? = nil
+        grammarChange: GrammarChangeSet? = nil,
+        changedDependencies externalChangedDependencies: Set<CompilerNodeDependency> = []
     ) throws -> CompilerIncrementalResult {
-        var grammarDependencies = Set<CompilerNodeDependency>()
+        var grammarDependencies = externalChangedDependencies
         var grammarMeasurement: ReuseMeasurement?
         if hasBaseline, artifactIdentity != nextArtifactIdentity {
             if let grammarChange,
@@ -274,7 +279,8 @@ public final class CompilerIncrementalSession {
                 payload: resolved,
                 dependencies: unit.ast.compilerDependencies.union(
                     unit.productionDependencies.map(
-                        CompilerNodeDependency.grammarProduction)),
+                        CompilerNodeDependency.grammarProduction))
+                    .union(unit.externalDependencies),
                 providedDependencies: provided)
         }
         let semanticReuse = workspace.semantics.reconcile(
@@ -335,7 +341,7 @@ public final class CompilerIncrementalSession {
     }
 }
 
-private func stableCompilerFingerprint(_ value: String) -> String {
+func stableCompilerFingerprint(_ value: String) -> String {
     var hash: UInt64 = 0xcbf29ce484222325
     for byte in value.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100000001b3 }
     return String(format: "%016llx", hash)
@@ -435,7 +441,7 @@ private func semanticMaterial(_ node: ResolvedASTNode) -> String {
     }
 }
 
-private func irMaterial(_ operations: [IROperation]) -> String {
+func irMaterial(_ operations: [IROperation]) -> String {
     operations.map { operation in
         switch operation {
         case .constant(let value): "constant:\(valueMaterial(value))"
