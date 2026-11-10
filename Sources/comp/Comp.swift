@@ -119,16 +119,21 @@ extension CompilerTool {
             } else {
                 ast = try compiler.parse(source, file: sourceFile)
             }
-            let artifacts = try compiler.analyze(ast)
+            let pipeline = CompilerDemandDrivenSession()
+            try pipeline.update(ast, revision: 1)
             if emit.contains(.ast) { print(ast) }
-            if emit.contains(.typedAST) { print(artifacts.typedAST) }
+            if emit.contains(.typedAST) {
+                print(try pipeline.semantic().value.ast)
+            }
             if emit.contains(.ir) {
-                artifacts.ir.operations.enumerated().forEach { print("[\($0.offset)] \($0.element)") }
+                try pipeline.ir().value.operations.enumerated().forEach {
+                    print("[\($0.offset)] \($0.element)")
+                }
             }
 
             switch target {
             case .stack:
-                let compilation = try StackCodeGenerator.generate(artifacts.ir)
+                let compilation = try pipeline.stackBytecode().value
                 if emit.contains(.bytecode) {
                     compilation.instructions.enumerated().forEach { print("[\($0.offset)] \($0.element)") }
                 }
@@ -139,7 +144,7 @@ extension CompilerTool {
                 let result = trace ? try machine.executeWithTrace() : try machine.execute()
                 if emit.contains(.result) { print("Result: \(result ?? .null)") }
             case .register:
-                let compilation = try RegisterCodeGenerator.generate(artifacts.ir)
+                let compilation = try pipeline.registerBytecode().value
                 if emit.contains(.bytecode) {
                     compilation.instructions.enumerated().forEach { print("[\($0.offset)] \($0.element)") }
                 }

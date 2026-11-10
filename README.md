@@ -20,6 +20,13 @@ reverse-import closure, and equal canonical IR preserves
 the identity of `CompilerLinkedOutput`. Project evidence reports
 `compilerModules` and `linkedOutputs` separately from semantic and IR nodes.
 
+`CompilerDemandDrivenSession` is the lazy artifact boundary for one compiler
+document. Installing a monotonically revisioned AST executes no compiler pass.
+Consumers demand semantics, IR, linked IR, stack bytecode, or register
+bytecode; the session materializes only that stage's prerequisite chain and
+shares the results between later demands. Equivalent syntax revisions retain
+all materialized stages, while changed syntax invalidates the dependent chain.
+
 A small compiler and bytecode interpreter written in Swift. It includes an
 end-to-end source pipeline, semantic analysis, a backend-neutral intermediate
 representation, stack and register bytecode targets, validation, and virtual
@@ -51,6 +58,7 @@ RNGLR packages.
 - versioned, big-endian binary bytecode serialization;
 - injectable input, output, and trace handlers;
 - public compilation artifacts for inspecting the typed AST, symbols, and IR;
+- revisioned, demand-driven semantic, IR, link, and backend materialization;
 - unit, integration, negative, and cross-backend equivalence tests.
 - a non-terminal `compiler-conformance` adapter for the shared ecosystem corpus.
 
@@ -290,6 +298,28 @@ print(artifacts.ir.operations)
 let stack = try StackCodeGenerator.generate(artifacts.ir)
 let registers = try RegisterCodeGenerator.generate(artifacts.ir)
 ```
+
+### Materialize compiler stages on demand
+
+```swift
+let ast = try Compiler().parse(source)
+let session = CompilerDemandDrivenSession()
+try session.update(ast, revision: 1) // no compiler pass runs here
+
+let semantics = try session.semantic()
+print(semantics.value.ast)
+
+let stack = try session.stackBytecode()
+print(stack.executedStages) // only missing prerequisites plus stack bytecode
+
+let registers = try session.registerBytecode()
+print(registers.reusedStages) // semantic, IR, and link are shared
+```
+
+Every demand returns stage-level reuse evidence. This boundary schedules
+artifacts lazily; fine-grained semantic and IR convergence remains owned by
+`CompilerIncrementalSession`, and project invalidation remains owned by
+`CompilerProjectSession`.
 
 ### Select a backend
 

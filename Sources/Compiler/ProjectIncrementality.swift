@@ -62,7 +62,7 @@ public final class CompilerLinkedOutput: @unchecked Sendable {
     public let fingerprint: String
     public let ir: IRProgram
 
-    fileprivate init(fingerprint: String, ir: IRProgram) {
+    init(fingerprint: String, ir: IRProgram) {
         self.fingerprint = fingerprint
         self.ir = ir
     }
