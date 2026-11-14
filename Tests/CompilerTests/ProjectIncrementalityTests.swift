@@ -92,6 +92,26 @@ final class ProjectIncrementalityTests: XCTestCase {
             1)
     }
 
+    func testImportListChangeInvalidatesTransitiveImporters() throws {
+        let session = CompilerProjectSession()
+        let bridge: CompilerProjectModuleID = "bridge"
+        func project(_ revision: UInt64, imports: Set<CompilerProjectModuleID>)
+            -> CompilerProjectSnapshot {
+            let base = snapshot(revision: revision, answer: .int(42))
+            return .init(revision: revision, modules: base.modules.map { module in
+                guard module.id == application else { return module }
+                return .init(id: application, imports: [bridge], units: module.units)
+            } + [.init(id: bridge, imports: imports, units: [])])
+        }
+        _ = try session.update(project(1, imports: [library]))
+        let updated = try session.update(project(2, imports: []))
+        XCTAssertEqual(updated.interfaceChangedModules, [])
+        XCTAssertEqual(updated.invalidatedModules, [bridge, application])
+        XCTAssertEqual(updated.reusedModules, [library])
+        XCTAssertEqual(updated.linkedOutput.ir,
+                       try CompilerProjectSession().update(project(2, imports: [])).linkedOutput.ir)
+    }
+
     func testRemovingUnreferencedModuleRetainsLinkedOutputAndReportsRemoval() throws {
         let session = CompilerProjectSession()
         let initial = try session.update(snapshot(

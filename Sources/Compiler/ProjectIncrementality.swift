@@ -85,7 +85,7 @@ public struct CompilerProjectResult: Sendable {
 ///
 /// Modules share one semantic program, so ordinary symbol/function/type edges
 /// continue to be derived by Compiler. Import edges add a conservative module
-/// dependency: an exported-interface change rebuilds direct importers, while a
+/// dependency: an exported-interface change rebuilds transitive importers, while a
 /// body-only change does not propagate beyond its defining module.
 public final class CompilerProjectSession {
     private struct ModuleState {
@@ -155,13 +155,25 @@ public final class CompilerProjectSession {
             }
         }
 
-        var invalidatedModules = interfaceChanged
-        var invalidationWork = Array(interfaceChanged)
+        // A changed import list can change resolution even when a module's
+        // declarations and source units are identical.
+        let changedImports = snapshot.modules.compactMap { module -> CompilerProjectModuleID? in
+            guard let previous = modules[module.id],
+                  previous.imports != module.imports else { return nil }
+            return module.id
+        }
+        var importers: [CompilerProjectModuleID: [CompilerProjectModuleID]] = [:]
+        for module in snapshot.modules {
+            for imported in module.imports {
+                importers[imported, default: []].append(module.id)
+            }
+        }
+        var invalidatedModules = interfaceChanged.union(changedImports)
+        var invalidationWork = Array(invalidatedModules)
         while let changed = invalidationWork.popLast() {
-            for module in snapshot.modules
-                where module.imports.contains(changed)
-                    && invalidatedModules.insert(module.id).inserted {
-                invalidationWork.append(module.id)
+            for importer in importers[changed, default: []]
+                where invalidatedModules.insert(importer).inserted {
+                invalidationWork.append(importer)
             }
         }
         let changedDependencies = Set(invalidatedModules.map {
@@ -170,7 +182,7 @@ public final class CompilerProjectSession {
         let flattenedUnits = snapshot.modules.sorted { $0.id < $1.id }.flatMap { module in
             let importedDependencies = Set(module.imports.map {
                 CompilerNodeDependency.module($0.rawValue)
-            })
+            }).union([.module(module.id.rawValue)])
             return module.units.map { unit in
                 CompilerIncrementalUnit(
                     id: unit.id,
