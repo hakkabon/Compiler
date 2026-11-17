@@ -12,14 +12,14 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.2"),
-        .package(path: "../Grammar"),
-        .package(path: "../Parser"),
-        .package(path: "../Lexer"),
-        .package(path: "../Lexer-FSA"),
-        .package(path: "../Earley-Parser"),
-        .package(path: "../CYK-Parser"),
-        .package(path: "../RNGLR-Parser"),
-        .package(path: "../Incremental-Parsing"),
+        .package(url: "https://github.com/hakkabon/Grammar.git", .upToNextMinor(from: "0.9.1")),
+        .package(url: "https://github.com/hakkabon/Parser.git", .upToNextMinor(from: "0.12.1")),
+        .package(url: "https://github.com/hakkabon/Lexer.git", .upToNextMinor(from: "0.9.1")),
+        .package(url: "https://github.com/hakkabon/Lexer-FSA.git", .upToNextMinor(from: "0.2.0")),
+        .package(url: "https://github.com/hakkabon/Earley-Parser.git", .upToNextMinor(from: "0.10.1")),
+        .package(url: "https://github.com/hakkabon/CYK-Parser.git", .upToNextMinor(from: "0.3.1")),
+        .package(url: "https://github.com/hakkabon/RNGLR-Parser.git", .upToNextMinor(from: "0.10.1")),
+        .package(url: "https://github.com/hakkabon/Incremental-Parsing.git", .upToNextMinor(from: "0.33.0")),
     ],
     targets: [
         .target(
